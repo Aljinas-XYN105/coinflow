@@ -1,0 +1,6 @@
+{
+  "name": "Coinflow",
+  "description": "Offline-First Android Expense Tracker with modern design and animations",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
