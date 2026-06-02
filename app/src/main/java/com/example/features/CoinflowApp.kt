@@ -14,7 +14,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -59,26 +62,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 // Custom scale press micro-interaction
-fun Modifier.pressScaleEffect() = composed {
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
-        label = "PressScale"
-    )
-    this.graphicsLayer {
-        scaleX = scale
-        scaleY = scale
-    }.pointerInput(Unit) {
-        detectTapGestures(
-            onPress = {
-                isPressed = true
-                tryAwaitRelease()
-                isPressed = false
-            }
-        )
-    }
-}
+fun Modifier.pressScaleEffect() = this
 
 // iOS Native Design Helper Component: Grouped Section (Grouped UITableView Style)
 @Composable
@@ -267,7 +251,6 @@ fun iOSAlertDialog(
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .width(280.dp)
-                .pressScaleEffect()
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -367,7 +350,6 @@ fun iOSFormInputField(
             keyboardOptions = keyboardOptions,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
                 .clip(RoundedCornerShape(10.dp)),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
@@ -484,7 +466,7 @@ fun CoinflowApp(
                     when (screen) {
                         "Home" -> DashboardTab(viewModel)
                         "Stats" -> StatsTab(viewModel)
-                        "Wallets" -> WalletsTab(viewModel)
+                        "Transactions" -> TransactionsTab(viewModel)
                         "Settings" -> SettingsTab(viewModel)
                         else -> DashboardTab(viewModel)
                     }
@@ -670,33 +652,33 @@ fun CoinflowBottomBar(
                     }
                 }
 
-                // Tab Item: Wallets
-                val isWallets = currentScreen == "Wallets"
+                // Tab Item: Transactions
+                val isTransactions = currentScreen == "Transactions"
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clickable(
-                            onClick = { onScreenSelected("Wallets") },
+                            onClick = { onScreenSelected("Transactions") },
                             indication = null,
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                         )
                         .pressScaleEffect()
-                        .testTag("bottom_nav_wallets"),
+                        .testTag("bottom_nav_transactions"),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AccountBalanceWallet,
-                        contentDescription = "Wallets Icon",
-                        tint = if (isWallets) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                        imageVector = Icons.Default.ReceiptLong,
+                        contentDescription = "Transactions Icon",
+                        tint = if (isTransactions) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Wallets",
+                        text = "Transactions",
                         fontSize = 11.sp,
-                        fontWeight = if (isWallets) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isWallets) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                        fontWeight = if (isTransactions) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isTransactions) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                     )
                 }
 
@@ -819,7 +801,7 @@ fun DashboardTab(viewModel: CoinflowViewModel) {
             ) {
                 Column {
                     Text(
-                        text = "TOTAL WALLET BALANCE",
+                        text = "TOTAL BALANCE",
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
                         color = MaterialTheme.colorScheme.outline,
                         fontWeight = FontWeight.Bold
@@ -1053,7 +1035,7 @@ fun DashboardTab(viewModel: CoinflowViewModel) {
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onBackground
                 )
-                TextButton(onClick = { viewModel.currentScreen.value = "Stats" }) {
+                TextButton(onClick = { viewModel.currentScreen.value = "Transactions" }) {
                     Text("View All", color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -1399,72 +1381,100 @@ fun StatsTab(viewModel: CoinflowViewModel) {
             }
         }
 
-        // Custom Search and Filtration Layout
+    }
+}
+
+// ---------------- TRANSACTIONS TAB ----------------
+@Composable
+fun TransactionsTab(viewModel: CoinflowViewModel) {
+    val allTransactions by viewModel.filteredTransactions.collectAsStateWithLifecycle(emptyList())
+    val baseCurrency by viewModel.baseCurrency.collectAsStateWithLifecycle()
+    val categories by viewModel.repository.allCategories.collectAsStateWithLifecycle(emptyList())
+
+    var searchInput by remember { mutableStateOf("") }
+    var selectedCategoryFilter by remember { mutableStateOf<Category?>(null) }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(top = 24.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
         item {
             Text(
-                text = "Transaction History",
-                style = MaterialTheme.typography.titleMedium,
+                text = "Transactions",
+                style = MaterialTheme.typography.displaySmall,
+                fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Text search input styled exactly like iOS Search Controller
-            TextField(
-                value = searchInput,
-                onValueChange = {
-                    searchInput = it
-                    viewModel.searchQuery.value = it
-                },
-                placeholder = { Text("Search description...", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .testTag("search_input"),
-                leadingIcon = { Icon(Icons.Default.Search, "Search Icon", tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f),
-                    unfocusedContainerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground
-                )
+            Text(
+                text = "Search and track income & expense histories",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline
             )
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        // Custom Search and Filtration Layout
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Text search input styled exactly like iOS Search Controller
+                TextField(
+                    value = searchInput,
+                    onValueChange = {
+                        searchInput = it
+                        viewModel.searchQuery.value = it
+                    },
+                    placeholder = { Text("Search description...", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .testTag("search_input"),
+                    leadingIcon = { Icon(Icons.Default.Search, "Search Icon", tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) },
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f),
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                        focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onBackground
+                    )
+                )
 
-            // Filter Selector Chips
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedCategoryFilter == null,
-                        onClick = {
-                            selectedCategoryFilter = null
-                            viewModel.filterCategory.value = null
-                        },
-                        label = { Text("All") }
-                    )
-                }
-                items(categories) { cat ->
-                    FilterChip(
-                        selected = selectedCategoryFilter?.id == cat.id,
-                        onClick = {
-                            selectedCategoryFilter = cat
-                            viewModel.filterCategory.value = cat
-                        },
-                        label = { Text("${cat.icon} ${cat.name}") }
-                    )
+                // Filter Selector Chips
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedCategoryFilter == null,
+                            onClick = {
+                                selectedCategoryFilter = null
+                                viewModel.filterCategory.value = null
+                            },
+                            label = { Text("All") }
+                        )
+                    }
+                    items(categories) { cat ->
+                        FilterChip(
+                            selected = selectedCategoryFilter?.id == cat.id,
+                            onClick = {
+                                selectedCategoryFilter = cat
+                                viewModel.filterCategory.value = cat
+                            },
+                            label = { Text("${cat.icon} ${cat.name}") }
+                        )
+                    }
                 }
             }
         }
 
-        // Historig logs matching filter list
+        // Historic logs matching filter list
         if (allTransactions.isEmpty()) {
             item {
                 Box(
@@ -1487,138 +1497,6 @@ fun StatsTab(viewModel: CoinflowViewModel) {
                 }
             }
         }
-    }
-}
-
-// ---------------- WALLETS TAB ----------------
-@Composable
-fun WalletsTab(viewModel: CoinflowViewModel) {
-    val walletsWithBalances by viewModel.repository.walletsWithBalances.collectAsStateWithLifecycle(emptyList())
-    var showAddDialog by remember { mutableStateOf(false) }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(top = 24.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "My Wallets",
-                        style = MaterialTheme.typography.displaySmall,
-                        fontFamily = FontFamily.SansSerif,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = "Manage multi-currency cash flows",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-
-                IconButton(
-                    onClick = { showAddDialog = true },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                        .testTag("add_wallet_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add New Wallet Option",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        items(walletsWithBalances) { item ->
-            val wColor = try {
-                Color(android.graphics.Color.parseColor(item.wallet.colorHex ?: "#1E293B"))
-            } catch (e: Exception) {
-                MaterialTheme.colorScheme.secondary
-            }
-
-            // Glassmorphic Wallet Balance Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .border(
-                        0.5.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
-                        RoundedCornerShape(14.dp)
-                    )
-                    .padding(18.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(wColor.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(item.wallet.icon ?: "💵", fontSize = 20.sp)
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column {
-                            Text(
-                                text = item.wallet.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                            Text(
-                                text = "ISO: ${item.wallet.currencyCode}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                        }
-                    }
-
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = Money(item.currentBalanceMinor, item.wallet.currencyCode).format(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontFamily = FontFamily.SansSerif,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Current Balance",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    if (showAddDialog) {
-        AddWalletDialog(
-            viewModel = viewModel,
-            onDismiss = { showAddDialog = false }
-        )
     }
 }
 
@@ -1826,7 +1704,7 @@ fun SettingsTab(viewModel: CoinflowViewModel) {
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
-                            val codes = listOf("USD", "EUR", "GBP", "JPY", "CAD")
+                            val codes = listOf("INR", "USD", "EUR", "GBP", "JPY", "CAD")
                             codes.forEach { code ->
                                 DropdownMenuItem(
                                     text = { Text(code) },
@@ -1971,10 +1849,10 @@ fun AddExpenseSheet(
     // Init defaults when loaded
     LaunchedEffect(categories, wallets) {
         if (selectedCategory == null && categories.isNotEmpty()) {
-            selectedCategory = categories.first { it.type == TransactionType.EXPENSE }
+            selectedCategory = categories.firstOrNull { it.type == TransactionType.EXPENSE } ?: categories.firstOrNull()
         }
         if (selectedWallet == null && wallets.isNotEmpty()) {
-            selectedWallet = wallets.first()
+            selectedWallet = wallets.firstOrNull()
         }
     }
 
@@ -2000,46 +1878,48 @@ fun AddExpenseSheet(
                 textAlign = TextAlign.Center
             )
 
-            // Amount Visual Header Box
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.background)
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "AMOUNT",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = enteringAmountStr.ifEmpty { "0" },
-                        style = MaterialTheme.typography.displayMedium,
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedCategory?.type == TransactionType.INCOME) Color(0xFF4CAF50) else WarningRed
-                    )
-                }
-            }
-
-            // Wallet Selector Horizontal Chips
-            Column {
-                Text("Select flow wallet source:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(wallets) { wallet ->
-                        FilterChip(
-                            selected = selectedWallet?.id == wallet.id,
-                            onClick = { selectedWallet = wallet },
-                            label = { Text("${wallet.icon} ${wallet.name}") }
+            // Centered editable Amount Input Box with proper placeholder "0.00"
+            OutlinedTextField(
+                value = enteringAmountStr,
+                onValueChange = { newValue ->
+                    // Correctly allow decimals and digits up to 2 decimal places
+                    if (newValue.isEmpty() || newValue.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                        enteringAmountStr = newValue
+                    }
+                },
+                placeholder = {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "0.00",
+                            style = MaterialTheme.typography.displayMedium,
+                            fontFamily = FontFamily.SansSerif,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                         )
                     }
-                }
-            }
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.displayMedium.copy(
+                    fontFamily = FontFamily.SansSerif,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selectedCategory?.type == TransactionType.INCOME) Color(0xFF4CAF50) else WarningRed,
+                    textAlign = TextAlign.Center
+                ),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                    focusedContainerColor = MaterialTheme.colorScheme.background,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.background
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("amount_input")
+            )
 
             // Category Horizontal Scroll List
             Column {
@@ -2059,20 +1939,23 @@ fun AddExpenseSheet(
             // Note Text Fields & Date Trigger Box Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 // Note fields
-                TextField(
+                OutlinedTextField(
                     value = optionalNote,
                     onValueChange = { optionalNote = it },
                     placeholder = { Text("Enter optional memo...") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                    ),
                     modifier = Modifier
                         .weight(1.5f)
-                        .clip(RoundedCornerShape(12.dp)),
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
+                        .testTag("memo_input")
                 )
 
                 // Date triggers chip
@@ -2113,61 +1996,6 @@ fun AddExpenseSheet(
                 }
             }
 
-            // Custom Keypad Matrix
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val keys = listOf(
-                    listOf("1", "2", "3"),
-                    listOf("4", "5", "6"),
-                    listOf("7", "8", "9"),
-                    listOf(".", "0", "DEL")
-                )
-
-                keys.forEach { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        row.forEach { char ->
-                            Button(
-                                onClick = {
-                                    if (char == "DEL") {
-                                        if (enteringAmountStr.isNotEmpty()) {
-                                            enteringAmountStr = enteringAmountStr.dropLast(1)
-                                        }
-                                    } else if (char == ".") {
-                                        if (!enteringAmountStr.contains(".")) {
-                                            enteringAmountStr += "."
-                                        }
-                                    } else {
-                                        enteringAmountStr += char
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (char == "DEL") MaterialTheme.colorScheme.errorContainer
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(54.dp)
-                                    .pressScaleEffect()
-                            ) {
-                                Text(
-                                    text = char,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (char == "DEL") MaterialTheme.colorScheme.onErrorContainer
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             // Submit Primary buttons
             Button(
                 onClick = {
@@ -2177,7 +2005,7 @@ fun AddExpenseSheet(
                     }
 
                     val baseVal = enteringAmountStr.toDouble()
-                    val exponent = Money.getExponent(selectedWallet?.currencyCode ?: "USD")
+                    val exponent = Money.getExponent(selectedWallet?.currencyCode ?: "INR")
                     val decimalPower = Math.pow(10.0, exponent.toDouble())
                     val finalMinorVal = (baseVal * decimalPower).toInt()
 
@@ -2224,7 +2052,7 @@ fun ManageBudgetsDialog(
 
     LaunchedEffect(categories) {
         if (selectedCat == null && categories.isNotEmpty()) {
-            selectedCat = categories.first()
+            selectedCat = categories.firstOrNull()
         }
     }
 
@@ -2235,7 +2063,6 @@ fun ManageBudgetsDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .pressScaleEffect()
         ) {
             Column(
                 modifier = Modifier
@@ -2363,7 +2190,6 @@ fun AddWalletDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .pressScaleEffect()
         ) {
             Column(
                 modifier = Modifier
@@ -2519,7 +2345,6 @@ fun AddCategoryDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .pressScaleEffect()
         ) {
             Column(
                 modifier = Modifier

@@ -123,14 +123,18 @@ data class Money(
         val divisor = Math.pow(10.0, exp.toDouble())
         val decimalVal = minor.toDouble() / divisor
 
-        val formatter = NumberFormat.getCurrencyInstance(locale).apply {
-            this.currency = Currency.getInstance(this@Money.currency)
-            this.minimumFractionDigits = exp
-            this.maximumFractionDigits = exp
+        var formatted: String
+        if (currency.uppercase() == "INR") {
+            val df = java.text.DecimalFormat("#,##0.00")
+            formatted = "₹" + df.format(abs(decimalVal))
+        } else {
+            val formatter = NumberFormat.getCurrencyInstance(locale).apply {
+                this.currency = Currency.getInstance(this@Money.currency)
+                this.minimumFractionDigits = exp
+                this.maximumFractionDigits = exp
+            }
+            formatted = formatter.format(abs(decimalVal))
         }
-
-        // Format positive value without sign first, as format will deal with the negative sign.
-        var formatted = formatter.format(abs(decimalVal))
         
         // Let's standardise formatting with proper sign prepended
         if (minor < 0) {

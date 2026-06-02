@@ -47,7 +47,7 @@ class CoinflowViewModel(application: Application) : AndroidViewModel(application
     private val prefs: SharedPreferences = application.getSharedPreferences("coinflow_prefs", Context.MODE_PRIVATE)
 
     // Dynamic preferences matching M3 specs
-    val baseCurrency = MutableStateFlow(prefs.getString("base_currency", "USD") ?: "USD")
+    val baseCurrency = MutableStateFlow(prefs.getString("base_currency", "INR") ?: "INR")
     val biometricLockEnabled = MutableStateFlow(prefs.getBoolean("biometric_enabled", false))
     val darkMode = MutableStateFlow(prefs.getBoolean("dark_mode", true)) // default dark mode for visual richness
 
@@ -292,7 +292,7 @@ class CoinflowViewModel(application: Application) : AndroidViewModel(application
                     val walletName = item.wallet?.name ?: "Unknown"
                     val categoryName = item.category?.name ?: "Unknown"
                     // Display double formatting at boundary edge
-                    val walletCurrency = item.wallet?.currencyCode ?: "USD"
+                    val walletCurrency = item.wallet?.currencyCode ?: "INR"
                     val exponent = Money.getExponent(walletCurrency)
                     val divisor = Math.pow(10.0, exponent.toDouble())
                     val amountFormatted = t.amountMinor.toDouble() / divisor

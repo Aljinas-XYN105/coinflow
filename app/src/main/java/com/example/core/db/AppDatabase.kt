@@ -116,11 +116,11 @@ abstract class AppDatabase : RoomDatabase() {
                 categoryDao.insertCategory(cat)
             }
 
-            // Seed default "Cash" USD wallet
+            // Seed default "Cash" INR wallet
             val defaultWallet = Wallet(
                 name = "Cash",
-                currencyCode = "USD",
-                openingBalanceMinor = 100000, // $1,000.00 seeding default for immediate utility
+                currencyCode = "INR",
+                openingBalanceMinor = 5000000, // ₹50,000.00 seeding default for immediate utility
                 icon = "💵",
                 colorHex = "#4CAF50"
             )
